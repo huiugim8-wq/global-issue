@@ -1,0 +1,7 @@
+﻿fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+pymongo[srv]>=4.11,<5
+python-dotenv>=1.0,<2
+httpx>=0.28,<1
+argostranslate>=1.11,<2
+yfinance>=0.2.54,<1

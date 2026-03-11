@@ -1,0 +1,12 @@
+.env
+.venv/
+.argos/
+__pycache__/
+backend/__pycache__/
+*.pyc
+server.out.log
+server.err.log
+*.log
+uvicorn*.log
+tmp_*.json
+.pytest_cache/

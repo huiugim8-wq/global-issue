@@ -1,0 +1,98 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <title>Conflict Signal Map</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="top-panel">
+        <div class="hero-block">
+          <p class="overline">Verified Incident Map</p>
+          <h1 id="pageTitle">Conflict Signal Map</h1>
+          <p class="page-subtitle" id="pageSubtitle">
+            중동과 유럽 주변의 충돌 신호를 실시간 모니터링하는 지도 기반 브리핑.
+          </p>
+          <nav class="view-tabs" id="viewTabs" aria-label="카테고리 탭">
+            <button class="view-tab is-active" data-category="home">Home</button>
+            <button class="view-tab" data-category="war">War</button>
+            <button class="view-tab" data-category="politics">Politics</button>
+            <button class="view-tab" data-category="economy">Economy</button>
+            <button class="view-tab" data-category="disaster">Disaster</button>
+            <button class="view-tab" data-category="saved">Saved</button>
+          </nav>
+        </div>
+
+        <div class="status-block">
+          <article class="stat-card auth-card">
+            <span>내 저장 공간</span>
+            <div id="authPanel" class="auth-panel"></div>
+          </article>
+          <article class="stat-card stat-card--updated">
+            <span>최근 갱신</span>
+            <strong id="lastUpdated">-</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="main-layout">
+        <section class="map-panel">
+          <div id="map" class="map-canvas"></div>
+
+          <section class="map-feed-section">
+            <div class="map-feed-head">
+              <div>
+                <p class="overline">Live Coverage</p>
+                <h3 id="feedTitle">지도 기반 영향력 기사 Top 10</h3>
+                <p class="map-feed-copy" id="feedCopy">선택한 이슈 기준 실제 기사량과 영향력 높은 기사 랭킹을 API로 갱신합니다.</p>
+              </div>
+            </div>
+            <div id="mapFeedStats" class="map-feed-stats"></div>
+            <div id="mapFeedList" class="map-feed-list"></div>
+          </section>
+        </section>
+
+        <aside class="detail-panel">
+          <div class="detail-head">
+            <p class="overline">Detail</p>
+            <h2 id="detailTitle">핀을 선택해 주세요</h2>
+            <p id="detailSummary" class="detail-summary">
+              지도에서 사건 핀을 누르면 해당 이슈의 교차 검증 내용과 근거 기사가 여기에 표시됩니다.
+            </p>
+          </div>
+
+          <div id="detailChips" class="chip-row"></div>
+          <div id="detailActions" class="detail-actions"></div>
+          <div id="detailGrid" class="detail-grid"></div>
+
+          <section class="impact-section">
+            <div class="impact-section-head">
+              <p class="overline">Impact Metrics</p>
+              <h3>실시간 영향 지표</h3>
+              <p class="impact-section-copy"></p>
+            </div>
+            <div id="impactMetrics" class="impact-metrics"></div>
+          </section>
+
+          <section class="evidence-section">
+            <h3>근거 기사</h3>
+            <div id="evidenceList" class="evidence-list"></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module" src="https://www.tradingview-widget.com/w/en/tv-mini-chart.js"></script>
+    <script type="module" src="/static/script.js"></script>
+  </body>
+</html>

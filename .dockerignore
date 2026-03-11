@@ -1,0 +1,10 @@
+﻿__pycache__/
+*.pyc
+.env
+.argos/
+archive/
+docs/
+server.out.log
+server.err.log
+tmp_*.json
+.git/

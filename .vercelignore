@@ -1,0 +1,11 @@
+.venv
+.argos
+__pycache__
+backend/__pycache__
+backend/routes/__pycache__
+backend/services/__pycache__
+archive
+docs
+*.pyc
+uvicorn.out.log
+uvicorn.err.log
