@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import asyncio
@@ -22,32 +22,13 @@ from backend.routes.market_router import router as market_router
 
 load_dotenv()
 
-def normalize_runtime_path(path: Path) -> Path:
-    value = str(path)
-    if os.name == "nt" and value.startswith("\\\\?\\"):
-        return Path(value[4:])
-    return path
-
-
-BASE_DIR = normalize_runtime_path(Path(__file__).resolve().parent.parent)
-
-
-def default_argos_base_dir() -> Path:
-    override = os.getenv("ARGOS_BASE_DIR", "").strip()
-    if override:
-        return normalize_runtime_path(Path(override))
-    if os.getenv("VERCEL"):
-        return Path("/tmp/argos")
-    return BASE_DIR / ".argos"
-
-
-ARGOS_BASE_DIR = default_argos_base_dir()
-os.environ.setdefault("XDG_DATA_HOME", str(normalize_runtime_path(ARGOS_BASE_DIR / "data")))
-os.environ.setdefault("XDG_CACHE_HOME", str(normalize_runtime_path(ARGOS_BASE_DIR / "cache")))
-os.environ.setdefault("XDG_CONFIG_HOME", str(normalize_runtime_path(ARGOS_BASE_DIR / "config")))
+BASE_DIR = Path(__file__).resolve().parent.parent
+ARGOS_BASE_DIR = BASE_DIR / ".argos"
+os.environ.setdefault("XDG_DATA_HOME", str(ARGOS_BASE_DIR / "data"))
+os.environ.setdefault("XDG_CACHE_HOME", str(ARGOS_BASE_DIR / "cache"))
+os.environ.setdefault("XDG_CONFIG_HOME", str(ARGOS_BASE_DIR / "config"))
 
 try:
-    import argostranslate.package as argos_package
     import argostranslate.translate as argos_translate
     import argostranslate.sbd as argos_sbd
     from stanza.pipeline.core import DownloadMethod
@@ -67,8 +48,6 @@ try:
     argos_sbd.StanzaSentencizer.lazy_pipeline = _offline_lazy_pipeline
 except Exception:
     argos_translate = None
-
-ARGOS_TRANSLATION_READY: bool | None = None
 
 MONGODB_URL = (os.getenv("MONGODB_URL") or os.getenv("MONGODB_URI") or "").strip()
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "global_signal_map").strip() or "global_signal_map"
@@ -377,41 +356,8 @@ def build_ai_analysis(article: dict[str, Any], category: str, location: dict[str
     return {"opinion": opinion, "forecast": forecast, "impact": impact}
 
 
-def ensure_offline_translation_ready() -> bool:
-    global ARGOS_TRANSLATION_READY
-
-    if ARGOS_TRANSLATION_READY is not None:
-        return ARGOS_TRANSLATION_READY
-    if argos_translate is None or argos_package is None:
-        ARGOS_TRANSLATION_READY = False
-        return False
-
-    def has_translation() -> bool:
-        try:
-            installed_languages = argos_translate.get_installed_languages()
-            from_lang = next((language for language in installed_languages if language.code == "en"), None)
-            to_lang = next((language for language in installed_languages if language.code == "ko"), None)
-            if from_lang is None or to_lang is None:
-                return False
-            return from_lang.get_translation(to_lang) is not None
-        except Exception:
-            return False
-
-    if has_translation():
-        ARGOS_TRANSLATION_READY = True
-        return True
-
-    try:
-        ARGOS_TRANSLATION_READY = argos_package.install_package_for_language_pair("en", "ko") and has_translation()
-    except Exception:
-        ARGOS_TRANSLATION_READY = False
-    return ARGOS_TRANSLATION_READY
-
-
 def translate_text_offline(text: str) -> str:
     if not text or argos_translate is None:
-        return text
-    if not ensure_offline_translation_ready():
         return text
 
     try:
