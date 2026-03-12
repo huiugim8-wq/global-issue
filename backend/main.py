@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import asyncio
-import base64
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -67,7 +66,6 @@ try:
 
     argos_sbd.StanzaSentencizer.lazy_pipeline = _offline_lazy_pipeline
 except Exception:
-    argos_package = None
     argos_translate = None
 
 ARGOS_TRANSLATION_READY: bool | None = None
@@ -78,10 +76,6 @@ NEWSAPI_API_KEY = os.getenv("NEWSAPI_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip() or "gpt-4.1-mini"
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "gid_session").strip() or "gid_session"
-FALLBACK_AUTH_COOKIE_NAME = f"{SESSION_COOKIE_NAME}_nickname"
-FALLBACK_SAVED_COOKIE_NAME = f"{SESSION_COOKIE_NAME}_saved"
-COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
-MAX_FALLBACK_SAVED_ARTICLES = 20
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("ALLOWED_ORIGINS", "http://127.0.0.1:8000,http://localhost:8000").split(",")
@@ -508,43 +502,29 @@ async def translate_articles_to_korean(articles: list[dict[str, Any]]) -> list[d
         return translate_articles_to_korean_offline(articles)
 
 
-def article_relevance_text(article: dict[str, Any]) -> str:
+def article_text(article: dict[str, Any]) -> str:
     title = article.get("title_original") or article.get("title") or ""
     description = article.get("summary_original") or article.get("description") or ""
-    return f"{title} {description}".lower()
-
-
-def article_text(article: dict[str, Any]) -> str:
-    text = article_relevance_text(article)
     url = article.get("url") or ""
     source_name = article.get("source", {}).get("name") if isinstance(article.get("source"), dict) else article.get("source") or ""
-    return f"{text} {url} {source_name}".lower()
+    return f"{title} {description} {url} {source_name}".lower()
 
 
 def article_score(article: dict[str, Any], config: dict[str, Any]) -> int:
-    text = article_relevance_text(article)
-    title_text = (article.get("title_original") or article.get("title") or "").lower()
+    text = article_text(article)
     include_any = config.get("include_any", [])
-    score = 0
-    for term in include_any:
-        normalized = term.lower()
-        if normalized in text:
-            score += 1
-        if normalized in title_text:
-            score += 2
-    return score
+    return sum(1 for term in include_any if term.lower() in text)
 
 
 def filter_articles_for_category(articles: list[dict[str, Any]], config: dict[str, Any]) -> list[dict[str, Any]]:
     filtered = []
     for article in articles:
-        text = article_relevance_text(article)
+        text = article_text(article)
         if not text.strip():
             continue
         include_any = config.get("include_any", [])
         exclude_any = config.get("exclude_any", [])
-        include_matches = sum(1 for term in include_any if term.lower() in text)
-        if include_any and include_matches == 0:
+        if include_any and not any(term.lower() in text for term in include_any):
             continue
         if exclude_any and any(term.lower() in text for term in exclude_any):
             continue
@@ -643,9 +623,9 @@ def build_fallback_news_response(current_category: str, reason: str) -> dict[str
 
 
 async def get_database(request: Request):
-    database = getattr(request.app.state, "mongo_db", None)
+    database = request.app.state.mongo_db
     if database is None:
-        detail = getattr(request.app.state, "mongo_error", None) or "MongoDB is not connected"
+        detail = request.app.state.mongo_error or "MongoDB is not connected"
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
     return database
 
@@ -662,63 +642,11 @@ class SessionResponse(BaseModel):
 def normalize_nickname(nickname: str) -> tuple[str, str]:
     cleaned = " ".join((nickname or "").split()).strip()
     if len(cleaned) < 2:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nickname must be at least 2 characters.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="닉네임은 두 글자 이상이어야 합니다.")
     return cleaned, cleaned.casefold()
 
 
-def request_uses_secure_cookie(request: Request) -> bool:
-    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
-    return forwarded_proto == "https" or request.url.scheme == "https"
-
-
-def encode_cookie_payload(value: Any) -> str:
-    raw = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii")
-
-
-def decode_cookie_payload(value: str | None, *, default: Any) -> Any:
-    if not value:
-        return default
-    try:
-        padding = "=" * (-len(value) % 4)
-        raw = base64.urlsafe_b64decode((value + padding).encode("ascii"))
-        return json.loads(raw.decode("utf-8"))
-    except Exception:
-        return default
-
-
-def get_cookie_saved_articles(request: Request) -> list[dict[str, Any]]:
-    payload = decode_cookie_payload(request.cookies.get(FALLBACK_SAVED_COOKIE_NAME), default=[])
-    if not isinstance(payload, list):
-        return []
-    return [item for item in payload if isinstance(item, dict)]
-
-
-def set_cookie_saved_articles(response: Response, request: Request, articles: list[dict[str, Any]]) -> None:
-    response.set_cookie(
-        key=FALLBACK_SAVED_COOKIE_NAME,
-        value=encode_cookie_payload(articles[:MAX_FALLBACK_SAVED_ARTICLES]),
-        httponly=True,
-        samesite="lax",
-        secure=request_uses_secure_cookie(request),
-        max_age=COOKIE_MAX_AGE_SECONDS,
-    )
-
-
-async def get_optional_session_user(request: Request) -> dict[str, Any] | None:
-    database = getattr(request.app.state, "mongo_db", None)
-    if database is None:
-        fallback_nickname = request.cookies.get(FALLBACK_AUTH_COOKIE_NAME)
-        if not fallback_nickname:
-            return None
-        nickname, nickname_key = normalize_nickname(fallback_nickname)
-        return {
-            "session_token": None,
-            "user_id": f"cookie:{nickname_key}",
-            "nickname": nickname,
-            "storage": "cookie",
-        }
-
+async def get_optional_session_user(request: Request, database=Depends(get_database)) -> dict[str, Any] | None:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
@@ -738,14 +666,13 @@ async def get_optional_session_user(request: Request) -> dict[str, Any] | None:
     return {
         "session_token": token,
         "user_id": user["_id"],
-        "nickname": user.get("nickname", "Guest"),
-        "storage": "database",
+        "nickname": user.get("nickname", "게스트"),
     }
 
 
 async def require_session_user(session_user: dict[str, Any] | None = Depends(get_optional_session_user)) -> dict[str, Any]:
     if session_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Please log in to continue.")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="로그인 후 이용해 주세요.")
     return session_user
 
 
@@ -791,28 +718,6 @@ def serialize_saved_article(document: dict[str, Any]) -> SavedArticleResponse:
         pin_color=document.get("pin_color"),
         nickname=document.get("nickname"),
         saved_at=document["saved_at"].astimezone(timezone.utc).isoformat(),
-    )
-
-
-def serialize_cookie_saved_article(document: dict[str, Any]) -> SavedArticleResponse:
-    return SavedArticleResponse(
-        id=str(document["id"]),
-        article_id=document["article_id"],
-        title=document["title"],
-        url=document["url"],
-        category=document["category"],
-        source=document.get("source"),
-        summary=document.get("summary"),
-        region=document.get("region"),
-        continent=document.get("continent"),
-        location_label=document.get("location_label"),
-        country=document.get("country"),
-        country_name=document.get("country_name"),
-        lat=document.get("lat"),
-        lng=document.get("lng"),
-        pin_color=document.get("pin_color"),
-        nickname=document.get("nickname"),
-        saved_at=document["saved_at"],
     )
 
 
@@ -1065,22 +970,8 @@ async def get_auth_session(session_user: dict[str, Any] | None = Depends(get_opt
 
 
 @app.post("/api/auth/login", response_model=SessionResponse)
-async def login(request: Request, payload: SessionLoginRequest, response: Response) -> SessionResponse:
+async def login(payload: SessionLoginRequest, response: Response, database=Depends(get_database)) -> SessionResponse:
     nickname, nickname_key = normalize_nickname(payload.nickname)
-    secure_cookie = request_uses_secure_cookie(request)
-    database = getattr(request.app.state, "mongo_db", None)
-
-    if database is None:
-        response.set_cookie(
-            key=FALLBACK_AUTH_COOKIE_NAME,
-            value=nickname,
-            httponly=True,
-            samesite="lax",
-            secure=secure_cookie,
-            max_age=COOKIE_MAX_AGE_SECONDS,
-        )
-        return SessionResponse(authenticated=True, nickname=nickname)
-
     user = await database.users.find_one({"nickname_key": nickname_key})
     if user is None:
         insert_result = await database.users.insert_one(
@@ -1107,66 +998,36 @@ async def login(request: Request, payload: SessionLoginRequest, response: Respon
         value=token,
         httponly=True,
         samesite="lax",
-        secure=secure_cookie,
-        max_age=COOKIE_MAX_AGE_SECONDS,
+        secure=False,
+        max_age=60 * 60 * 24 * 30,
     )
     return SessionResponse(authenticated=True, nickname=nickname)
 
 
 @app.post("/api/auth/logout", response_model=SessionResponse)
-async def logout(request: Request, response: Response) -> SessionResponse:
-    database = getattr(request.app.state, "mongo_db", None)
+async def logout(request: Request, response: Response, database=Depends(get_database)) -> SessionResponse:
     token = request.cookies.get(SESSION_COOKIE_NAME)
-    if database is not None and token:
+    if token:
         await database.user_sessions.delete_many({"token": token})
-    secure_cookie = request_uses_secure_cookie(request)
-    response.delete_cookie(SESSION_COOKIE_NAME, samesite="lax", secure=secure_cookie)
-    response.delete_cookie(FALLBACK_AUTH_COOKIE_NAME, samesite="lax", secure=secure_cookie)
+    response.delete_cookie(SESSION_COOKIE_NAME)
     return SessionResponse(authenticated=False, nickname=None)
 
 
 @app.get("/api/articles/saved", response_model=list[SavedArticleResponse])
 async def list_saved_articles(
-    request: Request,
+    database=Depends(get_database),
     session_user: dict[str, Any] = Depends(require_session_user),
 ) -> list[SavedArticleResponse]:
-    database = getattr(request.app.state, "mongo_db", None)
-    if database is None:
-        documents = [
-            article
-            for article in get_cookie_saved_articles(request)
-            if article.get("user_id") == session_user["user_id"]
-        ]
-        documents.sort(key=lambda item: item.get("saved_at", ""), reverse=True)
-        return [serialize_cookie_saved_article(document) for document in documents]
-
     documents = await database.saved_articles.find({"user_id": session_user["user_id"]}).sort("saved_at", -1).to_list(length=100)
     return [serialize_saved_article(document) for document in documents]
 
 
 @app.post("/api/articles/saved", response_model=SavedArticleResponse, status_code=status.HTTP_201_CREATED)
 async def create_saved_article(
-    request: Request,
-    response: Response,
     payload: SavedArticleCreate,
+    database=Depends(get_database),
     session_user: dict[str, Any] = Depends(require_session_user),
 ) -> SavedArticleResponse:
-    database = getattr(request.app.state, "mongo_db", None)
-    if database is None:
-        documents = get_cookie_saved_articles(request)
-        for document in documents:
-            if document.get("user_id") == session_user["user_id"] and (document.get("article_id") == payload.article_id or document.get("url") == payload.url):
-                return serialize_cookie_saved_article(document)
-
-        document = payload.model_dump()
-        document["id"] = secrets.token_urlsafe(8)
-        document["user_id"] = session_user["user_id"]
-        document["nickname"] = session_user["nickname"]
-        document["saved_at"] = datetime.now(timezone.utc).isoformat()
-        documents.insert(0, document)
-        set_cookie_saved_articles(response, request, documents)
-        return serialize_cookie_saved_article(document)
-
     existing = await database.saved_articles.find_one({
         "user_id": session_user["user_id"],
         "$or": [{"article_id": payload.article_id}, {"url": payload.url}],
@@ -1187,24 +1048,10 @@ async def create_saved_article(
 
 @app.delete("/api/articles/saved/{saved_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_saved_article(
-    request: Request,
-    response: Response,
     saved_id: str,
+    database=Depends(get_database),
     session_user: dict[str, Any] = Depends(require_session_user),
 ) -> None:
-    database = getattr(request.app.state, "mongo_db", None)
-    if database is None:
-        documents = get_cookie_saved_articles(request)
-        filtered_documents = [
-            article
-            for article in documents
-            if not (article.get("id") == saved_id and article.get("user_id") == session_user["user_id"])
-        ]
-        if len(filtered_documents) == len(documents):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Saved article not found")
-        set_cookie_saved_articles(response, request, filtered_documents)
-        return None
-
     try:
         object_id = ObjectId(saved_id)
     except Exception as exc:
