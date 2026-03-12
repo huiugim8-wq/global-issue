@@ -1,7 +1,0 @@
-[project]
-name = "global-issue-map"
-version = "0.1.0"
-requires-python = ">=3.12,<3.13"
-
-[project.scripts]
-app = "backend.main:app"
